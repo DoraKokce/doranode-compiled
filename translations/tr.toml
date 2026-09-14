@@ -1,0 +1,7 @@
+settings = "Ayarlar"
+settings_save = "Kaydet"
+settings_graphical = "Görsel"
+settings_graphical_dark_mode = "Karanlık mod"
+settings_language = "Dil"
+settings_language_select = "Dil seç"
+settings_close = "Kapat"

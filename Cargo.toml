@@ -1,0 +1,18 @@
+[package]
+name = "doranode"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "doranode"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.36.1"
+pyo3 = "0.29.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "1.1.5"

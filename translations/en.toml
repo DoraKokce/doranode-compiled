@@ -1,0 +1,7 @@
+settings = "Settings"
+settings_save = "Save"
+settings_graphical = "Graphical"
+settings_graphical_dark_mode = "Dark mode"
+settings_language = "Language"
+settings_language_select = "Select language"
+settings_close = "Close"
