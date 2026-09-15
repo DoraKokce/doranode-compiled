@@ -64,22 +64,60 @@ impl OpKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct IrModule {
+    pub py_module: String,
+    pub alias: Option<String>,
+}
+
+impl IrModule {
+    pub fn generate_import(&self) -> String {
+        match &self.alias {
+            Some(alias) => format!("import {} as {}", self.py_module, alias),
+            None => format!("import {}", self.py_module),
+        }
+    }
+
+    pub fn generate(&self) -> String {
+        self.alias.clone().unwrap_or(self.py_module.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum IrExpr {
     Literal(IrLiteral),
-    Variable(String),
+    Identifier(String),
     BinOp(Box<IrExpr>, OpKind, Box<IrExpr>),
     UnaryOp(OpKind, Box<IrExpr>),
+
+    Call(Box<IrExpr>, Vec<IrExpr>),
+    ModuleRef(IrModule),
+
+    Member(Box<IrExpr>, Box<IrExpr>),
+    Index(Box<IrExpr>, Box<IrExpr>),
 }
 
 impl IrExpr {
     pub fn generate(&self, tabs: usize) -> String {
         let raw = match self {
             Self::Literal(l) => l.generate(),
-            Self::Variable(v) => v.clone(),
+            Self::Identifier(i) => i.clone(),
             Self::BinOp(l, op, r) => {
                 format!("{} {} {}", l.generate(0), op.to_string(), r.generate(0))
             }
             Self::UnaryOp(op, r) => op.to_string().to_owned() + &r.generate(0),
+
+            Self::Call(l, a) => format!(
+                "{}({})",
+                l.generate(0),
+                a.iter()
+                    .map(|e| e.generate(0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::ModuleRef(m) => m.generate(),
+
+            Self::Member(l, r) => format!("{}.{}", l.generate(0), r.generate(0)),
+            Self::Index(l, r) => format!("{}[{}]", l.generate(0), r.generate(0)),
         };
 
         "\n".repeat(tabs) + &raw
@@ -108,6 +146,27 @@ impl PyIrExpr {
 
 #[pymethods]
 impl PyIrExpr {
+    fn call(&self, args: Vec<PyIrExpr>) -> PyIrExpr {
+        PyIrExpr(IrExpr::Call(
+            Box::new(self.0.clone()),
+            args.iter().map(|pe| pe.0.clone()).collect(),
+        ))
+    }
+
+    fn member(&self, right: PyIrExpr) -> PyIrExpr {
+        PyIrExpr(IrExpr::Member(
+            Box::new(self.0.clone()),
+            Box::new(right.0.clone()),
+        ))
+    }
+
+    fn index(&self, right: PyIrExpr) -> PyIrExpr {
+        PyIrExpr(IrExpr::Index(
+            Box::new(self.0.clone()),
+            Box::new(right.0.clone()),
+        ))
+    }
+
     fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyIrExpr> {
         let rhs = PyIrExpr::coerce(other)?;
         Ok(PyIrExpr::binop(self.0.clone(), OpKind::Add, rhs))
