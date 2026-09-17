@@ -18,23 +18,18 @@ def _to_sock(v: Socket | type):
     if isinstance(v, type):
         return Socket(v)
 
-NODE_REGISTRY = {}
+REGISTRY = {}
 
-def populate_registry(id: str, func):
-    keys = id.split('.')
-    current = NODE_REGISTRY
+def _populate_registry(path: str, func):
+    parts = path.split(".")
+    current = REGISTRY
 
-    for key in keys[:-1]:
-        if key not in current or not isinstance(current[key], dict):
-            if key in current and not isinstance(current[key], dict):
-                raise ValueError(f"path conflict: '{key}' is already registered as a node function.")
-            current[key] = {}
-        current = current[key]
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
 
-    if keys[-1] in current and isinstance(current[keys[-1]], dict):
-        raise ValueError(f"path conflict: '{keys[-1]}' is already a module namespace, cannot attach node.")
-
-    current[keys[-1]] = func
+    current[parts[-1]] = func
 
 def node(id: str, inputs: dict[str, Socket | type], outputs: dict[str, Socket | type]):
     def wrapper(func):
@@ -44,7 +39,7 @@ def node(id: str, inputs: dict[str, Socket | type], outputs: dict[str, Socket | 
         func._node_inputs = {k: _to_sock(v) for k, v in inputs.items()} # type: ignore
         func._node_outputs = {k: _to_sock(v) for k, v in outputs.items()} # type: ignore
 
-        populate_registry(func.__module__ + '.' + id, func)
+        _populate_registry(id, func)
 
         return func
     return wrapper

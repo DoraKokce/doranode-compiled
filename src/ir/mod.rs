@@ -2,6 +2,7 @@ use pyo3::{
     Bound, FromPyObject, PyAny, PyErr, PyRef, PyResult, exceptions::PyTypeError, pyclass,
     pymethods, types::PyAnyMethods,
 };
+use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 pub mod context;
 
@@ -70,13 +71,6 @@ pub struct IrModule {
 }
 
 impl IrModule {
-    pub fn generate_import(&self) -> String {
-        match &self.alias {
-            Some(alias) => format!("import {} as {}", self.py_module, alias),
-            None => format!("import {}", self.py_module),
-        }
-    }
-
     pub fn generate(&self) -> String {
         self.alias.clone().unwrap_or(self.py_module.clone())
     }
@@ -92,7 +86,7 @@ pub enum IrExpr {
     Call(Box<IrExpr>, Vec<IrExpr>),
     ModuleRef(IrModule),
 
-    Member(Box<IrExpr>, Box<IrExpr>),
+    Member(Box<IrExpr>, String),
     Index(Box<IrExpr>, Box<IrExpr>),
 }
 
@@ -100,7 +94,7 @@ impl IrExpr {
     pub fn generate(&self, tabs: usize) -> String {
         let raw = match self {
             Self::Literal(l) => l.generate(),
-            Self::Identifier(i) => i.clone(),
+            Self::Identifier(v) => v.clone(),
             Self::BinOp(l, op, r) => {
                 format!("{} {} {}", l.generate(0), op.to_string(), r.generate(0))
             }
@@ -116,7 +110,7 @@ impl IrExpr {
             ),
             Self::ModuleRef(m) => m.generate(),
 
-            Self::Member(l, r) => format!("{}.{}", l.generate(0), r.generate(0)),
+            Self::Member(l, r) => format!("{}.{}", l.generate(0), r),
             Self::Index(l, r) => format!("{}[{}]", l.generate(0), r.generate(0)),
         };
 
@@ -124,8 +118,9 @@ impl IrExpr {
     }
 }
 
+#[gen_stub_pyclass]
 #[pyclass(name = "IrExpr", from_py_object)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PyIrExpr(pub IrExpr);
 
 impl PyIrExpr {
@@ -144,27 +139,37 @@ impl PyIrExpr {
     }
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyIrExpr {
-    fn call(&self, args: Vec<PyIrExpr>) -> PyIrExpr {
-        PyIrExpr(IrExpr::Call(
-            Box::new(self.0.clone()),
-            args.iter().map(|pe| pe.0.clone()).collect(),
-        ))
+    #[new]
+    fn new(l: Bound<'_, PyAny>, is_ident: bool) -> PyResult<Self> {
+        if is_ident {
+            Ok(PyIrExpr(IrExpr::Identifier(l.extract()?)))
+        } else {
+            Ok(PyIrExpr(PyIrExpr::coerce(&l)?))
+        }
     }
 
-    fn member(&self, right: PyIrExpr) -> PyIrExpr {
-        PyIrExpr(IrExpr::Member(
-            Box::new(self.0.clone()),
-            Box::new(right.0.clone()),
-        ))
+    fn call(&self, args: Vec<Bound<'_, PyAny>>) -> PyResult<PyIrExpr> {
+        let arg_exprs = args
+            .iter()
+            .map(PyIrExpr::coerce)
+            .collect::<PyResult<Vec<IrExpr>>>()?;
+
+        Ok(PyIrExpr(IrExpr::Call(Box::new(self.0.clone()), arg_exprs)))
     }
 
-    fn index(&self, right: PyIrExpr) -> PyIrExpr {
-        PyIrExpr(IrExpr::Index(
+    fn member(&self, right: String) -> PyResult<PyIrExpr> {
+        Ok(PyIrExpr(IrExpr::Member(Box::new(self.0.clone()), right)))
+    }
+
+    fn index(&self, right: &Bound<'_, PyAny>) -> PyResult<PyIrExpr> {
+        let rhs = PyIrExpr::coerce(right)?;
+        Ok(PyIrExpr(IrExpr::Index(
             Box::new(self.0.clone()),
-            Box::new(right.0.clone()),
-        ))
+            Box::new(rhs),
+        )))
     }
 
     fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyIrExpr> {
@@ -209,7 +214,7 @@ impl PyIrExpr {
 
     fn __pow__(
         &self,
-        other: &Bound<'_, PyAny>,
+        exponent: &Bound<'_, PyAny>,
         modulo: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyIrExpr> {
         if modulo.is_some() {
@@ -217,13 +222,13 @@ impl PyIrExpr {
                 "3-argument pow() is not supported for IrExpr",
             ));
         }
-        let rhs = PyIrExpr::coerce(other)?;
+        let rhs = PyIrExpr::coerce(exponent)?;
         Ok(PyIrExpr::binop(self.0.clone(), OpKind::Pow, rhs))
     }
 
     fn __rpow__(
         &self,
-        other: &Bound<'_, PyAny>,
+        base: &Bound<'_, PyAny>,
         modulo: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyIrExpr> {
         if modulo.is_some() {
@@ -231,7 +236,7 @@ impl PyIrExpr {
                 "3-argument pow() is not supported for IrExpr",
             ));
         }
-        let lhs = PyIrExpr::coerce(other)?;
+        let lhs = PyIrExpr::coerce(base)?;
         Ok(PyIrExpr::binop(lhs, OpKind::Pow, self.0.clone()))
     }
 
