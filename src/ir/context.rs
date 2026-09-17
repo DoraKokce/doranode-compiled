@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use pyo3::{PyResult, pyclass, pymethods};
+use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::ir::{IrExpr, PyIrExpr};
+use crate::ir::{IrExpr, IrModule, PyIrExpr};
 
 #[derive(Clone)]
 pub struct Context {
@@ -15,10 +16,12 @@ impl Context {
     }
 }
 
-#[pyclass(from_py_object)]
+#[gen_stub_pyclass]
+#[pyclass(name = "Context", from_py_object)]
 #[derive(Clone)]
 pub struct Ctx(pub Context);
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl Ctx {
     #[getter]
@@ -36,5 +39,12 @@ impl Ctx {
             .get(key)
             .map(|expr| PyIrExpr(expr.clone()))
             .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(key.to_string()))
+    }
+
+    fn import_m(&self, name: String) -> PyIrExpr {
+        PyIrExpr(IrExpr::ModuleRef(IrModule {
+            py_module: name,
+            alias: None,
+        }))
     }
 }

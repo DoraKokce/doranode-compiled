@@ -2,6 +2,7 @@ use pyo3::{
     Bound, FromPyObject, PyAny, PyErr, PyRef, PyResult, exceptions::PyTypeError, pyclass,
     pymethods, types::PyAnyMethods,
 };
+use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 pub mod context;
 
@@ -64,30 +65,62 @@ impl OpKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct IrModule {
+    pub py_module: String,
+    pub alias: Option<String>,
+}
+
+impl IrModule {
+    pub fn generate(&self) -> String {
+        self.alias.clone().unwrap_or(self.py_module.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum IrExpr {
     Literal(IrLiteral),
-    Variable(String),
+    Identifier(String),
     BinOp(Box<IrExpr>, OpKind, Box<IrExpr>),
     UnaryOp(OpKind, Box<IrExpr>),
+
+    Call(Box<IrExpr>, Vec<IrExpr>),
+    ModuleRef(IrModule),
+
+    Member(Box<IrExpr>, String),
+    Index(Box<IrExpr>, Box<IrExpr>),
 }
 
 impl IrExpr {
     pub fn generate(&self, tabs: usize) -> String {
         let raw = match self {
             Self::Literal(l) => l.generate(),
-            Self::Variable(v) => v.clone(),
+            Self::Identifier(v) => v.clone(),
             Self::BinOp(l, op, r) => {
                 format!("{} {} {}", l.generate(0), op.to_string(), r.generate(0))
             }
             Self::UnaryOp(op, r) => op.to_string().to_owned() + &r.generate(0),
+
+            Self::Call(l, a) => format!(
+                "{}({})",
+                l.generate(0),
+                a.iter()
+                    .map(|e| e.generate(0))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::ModuleRef(m) => m.generate(),
+
+            Self::Member(l, r) => format!("{}.{}", l.generate(0), r),
+            Self::Index(l, r) => format!("{}[{}]", l.generate(0), r.generate(0)),
         };
 
         "\n".repeat(tabs) + &raw
     }
 }
 
+#[gen_stub_pyclass]
 #[pyclass(name = "IrExpr", from_py_object)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PyIrExpr(pub IrExpr);
 
 impl PyIrExpr {
@@ -106,8 +139,39 @@ impl PyIrExpr {
     }
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyIrExpr {
+    #[new]
+    fn new(l: Bound<'_, PyAny>, is_ident: bool) -> PyResult<Self> {
+        if is_ident {
+            Ok(PyIrExpr(IrExpr::Identifier(l.extract()?)))
+        } else {
+            Ok(PyIrExpr(PyIrExpr::coerce(&l)?))
+        }
+    }
+
+    fn call(&self, args: Vec<Bound<'_, PyAny>>) -> PyResult<PyIrExpr> {
+        let arg_exprs = args
+            .iter()
+            .map(PyIrExpr::coerce)
+            .collect::<PyResult<Vec<IrExpr>>>()?;
+
+        Ok(PyIrExpr(IrExpr::Call(Box::new(self.0.clone()), arg_exprs)))
+    }
+
+    fn member(&self, right: String) -> PyResult<PyIrExpr> {
+        Ok(PyIrExpr(IrExpr::Member(Box::new(self.0.clone()), right)))
+    }
+
+    fn index(&self, right: &Bound<'_, PyAny>) -> PyResult<PyIrExpr> {
+        let rhs = PyIrExpr::coerce(right)?;
+        Ok(PyIrExpr(IrExpr::Index(
+            Box::new(self.0.clone()),
+            Box::new(rhs),
+        )))
+    }
+
     fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyIrExpr> {
         let rhs = PyIrExpr::coerce(other)?;
         Ok(PyIrExpr::binop(self.0.clone(), OpKind::Add, rhs))
@@ -150,7 +214,7 @@ impl PyIrExpr {
 
     fn __pow__(
         &self,
-        other: &Bound<'_, PyAny>,
+        exponent: &Bound<'_, PyAny>,
         modulo: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyIrExpr> {
         if modulo.is_some() {
@@ -158,13 +222,13 @@ impl PyIrExpr {
                 "3-argument pow() is not supported for IrExpr",
             ));
         }
-        let rhs = PyIrExpr::coerce(other)?;
+        let rhs = PyIrExpr::coerce(exponent)?;
         Ok(PyIrExpr::binop(self.0.clone(), OpKind::Pow, rhs))
     }
 
     fn __rpow__(
         &self,
-        other: &Bound<'_, PyAny>,
+        base: &Bound<'_, PyAny>,
         modulo: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyIrExpr> {
         if modulo.is_some() {
@@ -172,7 +236,7 @@ impl PyIrExpr {
                 "3-argument pow() is not supported for IrExpr",
             ));
         }
-        let lhs = PyIrExpr::coerce(other)?;
+        let lhs = PyIrExpr::coerce(base)?;
         Ok(PyIrExpr::binop(lhs, OpKind::Pow, self.0.clone()))
     }
 
