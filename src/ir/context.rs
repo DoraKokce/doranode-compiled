@@ -24,7 +24,7 @@ impl Context {
 }
 
 #[gen_stub_pyclass]
-#[pyclass(name = "Context", from_py_object)]
+#[pyclass(name = "Context", from_py_object, module = "doranode")]
 #[derive(Clone)]
 pub struct Ctx(pub Context);
 

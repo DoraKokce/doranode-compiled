@@ -119,7 +119,7 @@ impl IrExpr {
 }
 
 #[gen_stub_pyclass]
-#[pyclass(name = "IrExpr", from_py_object)]
+#[pyclass(name = "IrExpr", from_py_object, module = "doranode")]
 #[derive(Debug, Clone)]
 pub struct PyIrExpr(pub IrExpr);
 
